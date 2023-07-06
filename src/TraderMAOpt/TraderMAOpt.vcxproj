@@ -22,7 +22,7 @@
     <ProjectGuid>{16E66270-DA04-45E8-8D98-9C27B2BDFCCB}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>TraderMAOpt</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.22000.0</WindowsTargetPlatformVersion>
     <ProjectName>TraderMAOpt</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
