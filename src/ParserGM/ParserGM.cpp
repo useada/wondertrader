@@ -109,10 +109,20 @@ inline std::string fromGmExchg(const std::string emExchg)
 	}
 }
 
+inline std::string toGmCode(const std::string &code)
+{
+	auto tmp = code;
+	StrUtil::replace(tmp, "SSE", "SHSE");
+	//StrUtil::replace(code, "SZSE", "SZSE");
+
+	return tmp;
+}
 
 ParserGM::ParserGM()
 	: _sink(NULL)
+	, _uTradingDate(0)
 	, _connected(false)
+	, _ready(false)
 {
 }
 
@@ -145,9 +155,12 @@ bool ParserGM::init( WTSVariant* config )
 	Strategy::set_token(_token.c_str());
 	//Strategy::set_mode(_mode); // MODE_LIVE MODE_BACKTEST
 	Strategy::set_mode(MODE_LIVE);
+	//Strategy::set_mode(MODE_BACKTEST);
 
 	//Strategy::set_backtest_config(_begin_time.c_str(), _end_time.c_str(), 0, 
 	//	1, 0, 0, 0, 1);
+	//Strategy::set_backtest_config("2023-07-07 09:30:00", "2023-07-07 15:00:00",
+	//	1000000, 1, 0, 0, 0, 1);
 
 	return true;
 }
@@ -155,26 +168,6 @@ bool ParserGM::init( WTSVariant* config )
 void ParserGM::release()
 {
 	//std::cout << "ParserGM release" << std::endl;
-}
-
-void ParserGM::subscribe()
-{
-	//std::cout << "ParserGM subscribe" << std::endl;
-
-	for (auto& code : _set_subs)
-	{
-		int iResult = Strategy::subscribe(code.c_str(), "tick");
-		if (iResult != 0)
-		{
-			if (_sink)
-				write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: {} {}", code.c_str(), iResult);
-		}
-		else
-		{
-			if (_sink)
-				write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
-		}
-	}
 }
 
 bool ParserGM::connect()
@@ -215,12 +208,59 @@ void ParserGM::subscribe( const CodeSet &vecSymbols )
 	for(; cit != vecSymbols.end(); cit++)
 	{
 		const auto &code = *cit;
+		//if (_sink)
+		//	write_log(_sink, LL_DEBUG, "[ParserGM] {} to subscribe", code.c_str());
+
 		if(_set_subs.find(code) == _set_subs.end())
 		{
 			_set_subs.insert(code);
+			//if (_sink)
+			//	write_log(_sink, LL_INFO, "[ParserGM] {} add to subscribe list", code.c_str());
+
+			//if (_uTradingDate != 0)
+			if (_ready)
+			{
+				auto gmCode = toGmCode(code.c_str());
+				int iResult = Strategy::subscribe(gmCode.c_str(), "tick");
+				if (iResult != 0)
+				{
+					if (_sink)
+						write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
+							code.c_str(), gmCode.c_str(), iResult);
+				}
+				else
+				{
+					if (_sink)
+						write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
+				}
+			}
 		}
 	}
 }
+
+void ParserGM::subscribeOnInit()
+{
+	if (_sink)
+		write_log(_sink, LL_INFO, "[ParserGM] to subscribe on init");
+
+	for (auto& code : _set_subs)
+	{
+		auto gmCode = toGmCode(code.c_str());
+		int iResult = Strategy::subscribe(gmCode.c_str(), "tick");
+		if (iResult != 0)
+		{
+			if (_sink)
+				write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
+					code.c_str(), gmCode.c_str(), iResult);
+		}
+		else
+		{
+			if (_sink)
+				write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
+		}
+	}
+}
+
 
 void ParserGM::unsubscribe(const CodeSet &setSymbols)
 {
@@ -246,9 +286,22 @@ void ParserGM::registerSpi(IParserSpi* listener)
 void ParserGM::on_init()
 {
 	//std::cout << "ParserGM on_init" << std::endl;
-
 	if (_sink)
 		write_log(_sink, LL_INFO, "[ParserGM] on init");
+
+	//time_t t = now() / 1000;
+	const time_t t = now();
+	const tm* tNow = localtime(&t);
+	const uint64_t date = (tNow->tm_year + 1900) * 10000 + (tNow->tm_mon + 1) * 100 + tNow->tm_mday;
+	_uTradingDate = date;
+	_ready = true;
+
+	if (_sink)
+		write_log(_sink, LL_INFO, "[ParserGM] on init tradingDate={}", _uTradingDate);
+
+	_sink->handleEvent(WPE_Login, 0);
+
+	subscribeOnInit();
 }
 
 
@@ -256,22 +309,26 @@ void ParserGM::on_market_data_connected()
 {
 	_connected = true;
 	if (_sink)
+	{
+		_sink->handleEvent(WPE_Connect, 0);
 		write_log(_sink, LL_INFO, "[ParserGM] connected");
+	}
 }
 
 void ParserGM::on_market_data_disconnected()
 {
 	_connected = false;
 	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] disconnected");
+	{
+		write_log(_sink, LL_ERROR, "[ParserGM] Market data server disconnected");
+		_sink->handleEvent(WPE_Close, 0);
+	}
 }
 
 void ParserGM::on_tick(Tick* tick)
 {
-	//std::cout << "ParserGM on_tick" << std::endl;
-
 	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on tick");
+		write_log(_sink, LL_INFO, "[ParserGM] on tick %s, %f", tick->symbol, tick->price);
 
 	if (_pBaseDataMgr == NULL)
 	{

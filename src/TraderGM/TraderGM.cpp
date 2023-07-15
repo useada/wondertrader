@@ -237,6 +237,7 @@ inline uint32_t makeRefID()
 	return auto_refid.fetch_add(1);
 }
 
+// ============================================================================
 
 TraderGM::TraderGM()
 	: _sink(NULL)
@@ -248,6 +249,7 @@ TraderGM::TraderGM()
 	, _bd_mgr(NULL)
 	, _tradingday(0)
 	, _connected(false)
+	, _ready(false)
 {
 }
 
@@ -255,6 +257,276 @@ TraderGM::TraderGM()
 TraderGM::~TraderGM()
 {
 }
+
+bool TraderGM::init(WTSVariant *config)
+{
+	_strategy_id = config->getCString("strategy_id");
+	_token = config->getCString("token");
+	//_mode = config->getInt32("mode");
+	//_initial_cash = config->getDouble("initial_cash");
+
+	if (_sink)
+	{
+		write_log(_sink, LL_INFO, "[TraderGM] strategy id: {}", _strategy_id);
+		write_log(_sink, LL_INFO, "[TraderGM] token: {}", _token);
+		//write_log(_sink, LL_INFO, "[TraderGM] mode: {}", _mode);
+		//write_log(_sink, LL_INFO, "[TraderGM] initial_cash: {}", _initial_cash);
+	}
+
+	Strategy::set_strategy_id(_strategy_id.c_str());
+	Strategy::set_token(_token.c_str());
+	//Strategy::set_mode(_mode);
+
+	//Strategy::set_mode(MODE_BACKTEST);
+	Strategy::set_mode(MODE_LIVE);
+	//Strategy::set_backtest_config("2023-07-07 09:30:00", "2023-07-07 15:00:00",
+	//	1000000, 1, 0, 0, 0, 1);
+
+
+	//if (_sink)
+	//{
+	//	_sink->getBaseDataMgr().
+	//}
+
+	return true;
+}
+
+void TraderGM::release()
+{
+	if (_orders)
+		_orders->clear();
+
+	if (_positions)
+		_positions->clear();
+
+	if (_trades)
+		_trades->clear();
+}
+
+void TraderGM::registerSpi(ITraderSpi *listener)
+{
+	_sink = listener;
+	if (_sink)
+	{
+		_bd_mgr = listener->getBaseDataMgr();
+	}
+}
+
+void TraderGM::connect()
+{
+	if (_sink)
+		write_log(_sink, LL_INFO, "[TraderGM] connect");
+
+	_thrd_worker.reset(new StdThread(boost::bind(&TraderGM::doWork, this)));
+}
+
+void TraderGM::disconnect()
+{
+	release();
+}
+
+bool TraderGM::isConnected()
+{
+	//return (_state == TS_ALLREADY);
+	return _connected;
+}
+
+int TraderGM::login(const char* user, const char* pass, const char* productInfo)
+{
+	doLogin();
+	return 0;
+}
+
+int TraderGM::logout()
+{
+	return 0;
+}
+
+bool TraderGM::makeEntrustID(char* buffer, int length)
+{
+	if (buffer == NULL || length == 0)
+		return false;
+
+	try
+	{
+		uint32_t orderref = _ordref.fetch_add(1) + 1;
+		//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderref);
+		fmtutil::format_to(buffer, "{}#{}", _tradingday, orderref);
+		return true;
+	}
+	catch (...)
+	{
+
+	}
+
+	return false;
+}
+
+int TraderGM::orderInsert(WTSEntrust* entrust)
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: not connected");
+		}
+		return -1;
+	}
+
+	std::string symbol = toGmExchg(entrust->getExchg());
+	symbol += ".";
+	symbol += entrust->getCode();
+
+	auto side = wrapDirectionType(entrust->getDirection(), entrust->getOffsetType());
+	auto orderType = OrderType_Limit;
+	auto positionEffect = wrapOffsetType(entrust->getOffsetType());
+
+	if (strlen(entrust->getUserTag()) > 0)
+	{
+		m_eidCache.put(entrust->getEntrustID(), entrust->getUserTag(), 0, [this](const char* message) {
+			write_log(_sink, LL_WARN, message);
+		});
+	}
+
+	Order order = place_order(symbol.c_str(), entrust->getVolume(), side, orderType, positionEffect, entrust->getPrice());
+	if (order.status == OrderStatus_Rejected)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: {}", order.ord_rej_reason_detail);
+		return -1;
+	}
+
+	return 0;
+}
+
+int TraderGM::orderAction(WTSEntrustAction* action)
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] Order cancelling failed: not connected");
+		}
+		return -1;
+	}
+
+	int ret = order_cancel(action->getOrderID());
+	if (ret != 0)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Order cancelling failed: {}", ret);
+	}
+
+	return 0;
+}
+
+int TraderGM::queryAccount()
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] query account failed: not connected");
+		}
+		return -1;
+	}
+
+	DataArray<Cash>* cashes = get_cash();
+	if (cashes == NULL)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Account querying failed");
+		return 0;
+	}
+
+	for (auto i=0; i<cashes->count(); i++)
+	{
+		OnQueryAsset(&cashes->at(i));
+	}
+
+	return 0;
+}
+
+int TraderGM::queryPositions()
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] query position failed: not connected");
+		}
+		return -1;
+	}
+
+	DataArray<Position>* positions = get_position();
+	if (positions == NULL)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Positions querying failed");
+		return 0;
+	}
+
+	for (auto i=0; i<positions->count(); i++)
+	{
+		OnQueryPosition(&positions->at(i));
+	}
+
+	return 0;
+}
+
+int TraderGM::queryOrders()
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] query order failed: not connected");
+		}
+		return -1;
+	}
+
+	DataArray<Order>* orders = get_orders();
+	if (orders == NULL)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Orders querying failed");
+		return 0;
+	}
+
+	for (auto i=0; i<orders->count(); i++)
+	{
+		OnQueryOrder(&orders->at(i));
+	}
+
+	return 0;
+}
+
+int TraderGM::queryTrades()
+{
+	if (! (_ready && _connected))
+	{
+		if (_sink != NULL)
+		{
+			write_log(_sink, LL_ERROR, "[TraderGM] query trade failed: not connected");
+		}
+		return -1;
+	}
+
+	DataArray<ExecRpt>* trades = get_execution_reports();
+	if (trades == NULL)
+	{
+		write_log(_sink, LL_ERROR, "[TraderGM] Trades querying failed");
+		return 0;
+	}
+
+	for (auto i=0; i<trades->count(); i++)
+	{
+		OnQueryTrade(&trades->at(i));
+	}
+
+	return 0;
+}
+
+
+// ============================================================================
+// ============================================================================
+// ============================================================================
+// ============================================================================
 
 
 WTSEntrust* TraderGM::makeEntrust(Order* order)
@@ -443,93 +715,6 @@ WTSTradeInfo* TraderGM::makeTradeInfo(ExecRpt* trade)
 	return pRet;
 }
 
-//void TraderGM::OnDisconnected(uint64_t session_id, int reason)
-//{
-//	if (_sink)
-//		_sink->handleEvent(WTE_Close, reason);
-//
-//	_asyncio.post([this](){
-//		write_log(_sink, LL_WARN, "[TraderXTP] Connection lost, relogin in 2 seconds...");
-//		std::this_thread::sleep_for(std::chrono::seconds(2));
-//		doLogin();
-//	});
-//}
-
-//void TraderGM::OnError(XTPRI *error_info)
-//{
-//	if (_sink && error_info)
-//		write_log(_sink,LL_ERROR, error_info->error_msg);
-//}
-
-void TraderGM::on_error(int error_code, const char *error_msg)
-{
-	if (_sink && error_msg)
-		write_log(_sink, LL_ERROR, "code: {}, msg: {}", error_code, error_msg);
-}
-
-// -------------------------------------------------------------------
-
-//void TraderGM::OnOrderEvent(XTPOrderInfo *order_info, XTPRI *error_info, uint64_t session_id)
-//{
-//	if(IsErrorInfo(error_info))
-//	{
-//		WTSEntrust* entrust = makeEntrust(order_info);
-//
-//		WTSError* error = WTSError::create(WEC_ORDERINSERT, error_info->error_msg);
-//		_sink->onRspEntrust(entrust, error);
-//		error->release();
-//
-//		entrust->release();
-//	}
-//	else
-//	{
-//		WTSOrderInfo *orderInfo = makeOrderInfo(order_info);
-//		if (orderInfo)
-//		{
-//			if (_sink)
-//				_sink->onPushOrder(orderInfo);
-//
-//			orderInfo->release();
-//		}
-//	}
-//}
-
-// gm
-void TraderGM::on_order_status(Order *order)
-{
-	WTSOrderInfo *orderInfo = makeOrderInfo(order);
-	if (orderInfo)
-	{
-		if (_sink)
-			_sink->onPushOrder(orderInfo);
-
-		orderInfo->release();
-	}
-}
-
-//void TraderGM::OnTradeEvent(XTPTradeReport *trade_info, uint64_t session_id)
-//{
-//	WTSTradeInfo *trdInfo = makeTradeInfo(trade_info);
-//	if (trdInfo)
-//	{
-//		if (_sink)
-//			_sink->onPushTrade(trdInfo);
-//
-//		trdInfo->release();
-//	}
-//}
-
-void TraderGM::on_execution_report(ExecRpt* trade)
-{
-	WTSTradeInfo *trdInfo = makeTradeInfo(trade);
-	if (trdInfo)
-	{
-		if (_sink)
-			_sink->onPushTrade(trdInfo);
-
-		trdInfo->release();
-	}
-}
 
 
 void TraderGM::OnCancelOrderError(std::string err_info)
@@ -692,90 +877,6 @@ void TraderGM::OnQueryAsset(Cash *cash)
 	ay->release();
 }
 
-#pragma endregion "XTP::API:TraderSpi"
-
-#pragma region "ITraderApi"
-bool TraderGM::init(WTSVariant *config)
-{
-	_strategy_id = config->getCString("strategy_id");
-	_token = config->getCString("token");
-	_mode = config->getInt32("mode");
-	_initial_cash = config->getDouble("initial_cash");
-
-	if (_sink)
-	{
-		write_log(_sink, LL_INFO, "[TraderGM] strategy id: {}", _strategy_id);
-		write_log(_sink, LL_INFO, "[TraderGM] token: {}", _token);
-		write_log(_sink, LL_INFO, "[TraderGM] mode: {}", _mode);
-		write_log(_sink, LL_INFO, "[TraderGM] initial_cash: {}", _initial_cash);
-	}
-
-	Strategy::set_strategy_id(_strategy_id.c_str());
-	Strategy::set_token(_token.c_str());
-	Strategy::set_mode(_mode);
-
-	return true;
-}
-
-void TraderGM::release()
-{
-	if (_orders)
-		_orders->clear();
-
-	if (_positions)
-		_positions->clear();
-
-	if (_trades)
-		_trades->clear();
-}
-
-void TraderGM::registerSpi(ITraderSpi *listener)
-{
-	_sink = listener;
-	if (_sink)
-	{
-		_bd_mgr = listener->getBaseDataMgr();
-	}
-}
-
-void TraderGM::on_trade_data_connected()
-{
-	_connected = true;
-	if (_sink)
-		write_log(_sink, LL_INFO, "[TraderGM] trade date connected");
-}
-
-void TraderGM::on_trade_data_disconnected()
-{
-	_connected = false;
-	if (_sink)
-		write_log(_sink, LL_WARN, "[TraderGM] trade date disconnected");
-}
-
-void TraderGM::connect()
-{
-	_thrd_worker.reset(new StdThread(boost::bind(&TraderGM::doWork, this)));
-}
-
-void TraderGM::doWork()
-{
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] do work in thread");
-
-	run();
-}
-
-void TraderGM::disconnect()
-{
-	release();
-}
-
-bool TraderGM::isConnected()
-{
-	//return (_state == TS_ALLREADY);
-	return _connected;
-}
-
 void TraderGM::genEntrustID(char* buffer, char* orderRef)
 {
 	//这里不再使用sessionid，因为每次登陆会不同，如果使用的话，可能会造成不唯一的情况
@@ -794,161 +895,154 @@ bool TraderGM::extractEntrustID(const char* entrustid, uint32_t &orderRef)
 	return true;
 }
 
-bool TraderGM::makeEntrustID(char* buffer, int length)
-{
-	if (buffer == NULL || length == 0)
-		return false;
-
-	try
-	{
-		uint32_t orderref = _ordref.fetch_add(1) + 1;
-		//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderref);
-		fmtutil::format_to(buffer, "{}#{}", _tradingday, orderref);
-		return true;
-	}
-	catch (...)
-	{
-
-	}
-
-	return false;
-}
-
-void TraderGM::doLogin()
-{
-	uint64_t ts = now();
-	TimeData td = getTimeDateFromTimeStamp(ts, true);
-	_tradingday = td.date;
-}
-
-int TraderGM::login(const char* user, const char* pass, const char* productInfo)
-{
-	doLogin();
-	return 0;
-}
-
-int TraderGM::logout()
-{
-	return 0;
-}
-
-int TraderGM::orderInsert(WTSEntrust* entrust)
-{
-	if (! _connected)
-	{
-		return -1;
-	}
-
-	std::string symbol = toGmExchg(entrust->getExchg());
-	symbol += ".";
-	symbol += entrust->getCode();
-
-	auto side = wrapDirectionType(entrust->getDirection(), entrust->getOffsetType());
-	auto orderType = OrderType_Limit;
-	auto positionEffect = wrapOffsetType(entrust->getOffsetType());
-
-	if (strlen(entrust->getUserTag()) > 0)
-	{
-		m_eidCache.put(entrust->getEntrustID(), entrust->getUserTag(), 0, [this](const char* message) {
-			write_log(_sink, LL_WARN, message);
-		});
-	}
-
-	Order order = place_order(symbol.c_str(), entrust->getVolume(), side, orderType, positionEffect, entrust->getPrice());
-	if (order.status == OrderStatus_Rejected)
-	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: {}", order.ord_rej_reason_detail);
-		return -1;
-	}
-
-	return 0;
-}
-
-int TraderGM::orderAction(WTSEntrustAction* action)
-{
-	if (! _connected)
-	{
-		return -1;
-	}
-
-	int ret = order_cancel(action->getOrderID());
-	if (ret != 0)
-	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Order cancelling failed: {}", ret);
-	}
-
-	return 0;
-}
-
 uint32_t TraderGM::genRequestID()
 {
 	return _reqid.fetch_add(1) + 1;
 }
 
-int TraderGM::queryAccount()
+// ============================================================================
+// ============================================================================
+// ============================================================================
+// ============================================================================
+
+void TraderGM::on_init()
 {
-	DataArray<Cash>* cashes = get_cash();
-	if (cashes == NULL)
-	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Account querying failed");
-		return 0;
-	}
+	if (_sink)
+		write_log(_sink, LL_INFO, "[TraderGM] on init");
 
-	for (auto i=0; i<cashes->count(); i++)
-	{
-		OnQueryAsset(&cashes->at(i));
-	}
+	//time_t t = now();
+	//tm* tNow = localtime(&t);
+	//uint64_t date = (tNow->tm_year + 1900) * 10000 + (tNow->tm_mon + 1) * 100 + tNow->tm_mday;
+	//_tradingday = date;
+	uint64_t ts = now();
+	TimeData td = getTimeDateFromTimeStamp(ts, true);
+	_tradingday = td.date;
+	_ready = true;
 
-	return 0;
+	if (_sink)
+		write_log(_sink, LL_INFO, "[TraderGM] on init tradingDate={}", _tradingday);
+
+	if (_sink)
+	{
+		_sink->onLoginResult(true, "", _tradingday);
+	}
 }
 
-int TraderGM::queryPositions()
+void TraderGM::on_trade_data_connected()
 {
-	DataArray<Position>* positions = get_position();
-	if (positions == NULL)
+	_connected = true;
+	if (_sink)
 	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Positions querying failed");
-		return 0;
+		_sink->handleEvent(WTE_Connect, 0);
+		write_log(_sink, LL_INFO, "[TraderGM] trade date connected");
 	}
-
-	for (auto i=0; i<positions->count(); i++)
-	{
-		OnQueryPosition(&positions->at(i));
-	}
-
-	return 0;
 }
 
-int TraderGM::queryOrders()
+//void TraderGM::OnDisconnected(uint64_t session_id, int reason)
+//{
+//	if (_sink)
+//		_sink->handleEvent(WTE_Close, reason);
+//
+//	_asyncio.post([this](){
+//		write_log(_sink, LL_WARN, "[TraderXTP] Connection lost, relogin in 2 seconds...");
+//		std::this_thread::sleep_for(std::chrono::seconds(2));
+//		doLogin();
+//	});
+//}
+void TraderGM::on_trade_data_disconnected()
 {
-	DataArray<Order>* orders = get_orders();
-	if (orders == NULL)
+	_connected = false;
+	if (_sink)
 	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Orders querying failed");
-		return 0;
+		_sink->handleEvent(WTE_Close, -1);
+		write_log(_sink, LL_WARN, "[TraderGM] trade date disconnected");
 	}
-
-	for (auto i=0; i<orders->count(); i++)
-	{
-		OnQueryOrder(&orders->at(i));
-	}
-
-	return 0;
 }
 
-int TraderGM::queryTrades()
+//void TraderGM::OnError(XTPRI *error_info)
+//{
+//	if (_sink && error_info)
+//		write_log(_sink,LL_ERROR, error_info->error_msg);
+//}
+void TraderGM::on_error(int error_code, const char *error_msg)
 {
-	DataArray<ExecRpt>* trades = get_execution_reports();
-	if (trades == NULL)
-	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Trades querying failed");
-		return 0;
-	}
-
-	for (auto i=0; i<trades->count(); i++)
-	{
-		OnQueryTrade(&trades->at(i));
-	}
-
-	return 0;
+	if (_sink)
+		write_log(_sink, LL_ERROR, "on_error code={}, msg={}", error_code, error_msg);
 }
+
+
+//void TraderGM::OnOrderEvent(XTPOrderInfo *order_info, XTPRI *error_info, uint64_t session_id)
+//{
+//	if(IsErrorInfo(error_info))
+//	{
+//		WTSEntrust* entrust = makeEntrust(order_info);
+//
+//		WTSError* error = WTSError::create(WEC_ORDERINSERT, error_info->error_msg);
+//		_sink->onRspEntrust(entrust, error);
+//		error->release();
+//
+//		entrust->release();
+//	}
+//	else
+//	{
+//		WTSOrderInfo *orderInfo = makeOrderInfo(order_info);
+//		if (orderInfo)
+//		{
+//			if (_sink)
+//				_sink->onPushOrder(orderInfo);
+//
+//			orderInfo->release();
+//		}
+//	}
+//}
+
+// gm
+void TraderGM::on_order_status(Order *order)
+{
+	WTSOrderInfo *orderInfo = makeOrderInfo(order);
+	if (orderInfo)
+	{
+		if (_sink)
+			_sink->onPushOrder(orderInfo);
+
+		orderInfo->release();
+	}
+}
+
+//void TraderGM::OnTradeEvent(XTPTradeReport *trade_info, uint64_t session_id)
+//{
+//	WTSTradeInfo *trdInfo = makeTradeInfo(trade_info);
+//	if (trdInfo)
+//	{
+//		if (_sink)
+//			_sink->onPushTrade(trdInfo);
+//
+//		trdInfo->release();
+//	}
+//}
+
+void TraderGM::on_execution_report(ExecRpt* trade)
+{
+	WTSTradeInfo *trdInfo = makeTradeInfo(trade);
+	if (trdInfo)
+	{
+		if (_sink)
+			_sink->onPushTrade(trdInfo);
+
+		trdInfo->release();
+	}
+}
+
+
+void TraderGM::doWork()
+{
+	if (_sink)
+		write_log(_sink, LL_INFO, "[TraderGM] do work in thread");
+
+	run();
+}
+
+void TraderGM::doLogin()
+{
+}
+

@@ -55,7 +55,7 @@ public:
 	virtual void on_market_data_disconnected() override; // 数据连接断开了
 
 private:
-	void	subscribe();
+	void	subscribeOnInit();
 	void	doWork();
 
 private:
@@ -64,6 +64,7 @@ private:
 	uint32_t				_uTradingDate;
 
 	bool					_connected;
+	bool					_ready;
 
 	CodeSet					_set_subs;
 

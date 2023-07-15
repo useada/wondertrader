@@ -33,9 +33,15 @@ public:
 
 
 public:
-	virtual void on_trade_data_connected() override;	// 交易已经连接上
+	// Strategy 接口
 
-	virtual void on_trade_data_disconnected() override; // 交易连接断开了
+	virtual void on_init() override;
+
+	// 交易已经连接
+	virtual void on_trade_data_connected() override;
+
+	// 交易连接断开
+	virtual void on_trade_data_disconnected() override;
 
 	//virtual void OnError(XTPRI *error_info) override;
 	virtual void on_error(int error_code, const char *error_msg) override;
@@ -46,6 +52,7 @@ public:
 	//virtual void OnTradeEvent(XTPTradeReport *trade_info, uint64_t session_id) override;
 	virtual void on_execution_report(ExecRpt* trade) override;
 
+private:
 	//virtual void OnCancelOrderError(XTPOrderCancelInfo *cancel_info, XTPRI *error_info, uint64_t session_id) override;
 	virtual void OnCancelOrderError(std::string err_info);
 
@@ -117,6 +124,7 @@ private:
 	IBaseDataMgr*			_bd_mgr;
 
 	bool					_connected;
+	bool					_ready;
 	uint32_t				_tradingday;
 	std::atomic<uint32_t>		_reqid;
 	std::atomic<uint32_t>		_ordref;		//报单引用
