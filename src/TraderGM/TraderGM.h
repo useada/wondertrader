@@ -11,6 +11,7 @@
 
 #include <stdint.h>
 #include <atomic>
+#include <queue>
 #include <boost/asio/io_service.hpp>
 
 //#include "../API/XTP2.2.32.2/xtp_trader_api.h"
@@ -57,16 +58,16 @@ private:
 	virtual void OnCancelOrderError(std::string err_info);
 
 	//virtual void OnQueryOrder(XTPQueryOrderRsp *order_info, XTPRI *error_info, int request_id, bool is_last, uint64_t session_id) override;
-	virtual void OnQueryOrder(Order* order);
+	//virtual WTSOrderInfo* OnQueryOrder(Order* order);
 
 	//virtual void OnQueryTrade(XTPQueryTradeRsp *trade_info, XTPRI *error_info, int request_id, bool is_last, uint64_t session_id) override;
-	virtual void OnQueryTrade(ExecRpt *trade_info);
+	//virtual void OnQueryTrade(ExecRpt *trade_info);
 
 	//virtual void OnQueryPosition(XTPQueryStkPositionRsp *position, XTPRI *error_info, int request_id, bool is_last, uint64_t session_id) override;
 	virtual void OnQueryPosition(Position *pos);
 
 	//virtual void OnQueryAsset(XTPQueryAssetRsp *asset, XTPRI *error_info, int request_id, bool is_last, uint64_t session_id) override;
-	virtual void OnQueryAsset(Cash *cash);
+	virtual WTSAccountInfo* makeAccountInfo(Cash *cash);
 
 public:
 	//////////////////////////////////////////////////////////////////////////
@@ -130,7 +131,15 @@ private:
 	std::atomic<uint32_t>		_ordref;		//报单引用
 
 	boost::asio::io_service		_asyncio;
-	StdThreadPtr				_thrd_worker;
+	StdThreadPtr				_thrd_api;
+
+
+	typedef std::queue<CommonExecuter>	QueryQue;
+	QueryQue				_queQuery;
+	StdUniqueMutex			_mtxQuery;
+	bool					_bStopped;
+	StdThreadPtr			_thrd_worker;
+
 
 	//委托单标记缓存器
 	WtKVCache		m_eidCache;

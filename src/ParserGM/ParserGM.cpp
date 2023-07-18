@@ -328,24 +328,32 @@ void ParserGM::on_market_data_disconnected()
 void ParserGM::on_tick(Tick* tick)
 {
 	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on tick %s, %f", tick->symbol, tick->price);
+		write_log(_sink, LL_INFO, "[ParserGM] on time={}, tick={}, price={}", tick->created_at, tick->symbol, tick->price);
 
 	if (_pBaseDataMgr == NULL)
 	{
 		return;
 	}
 
-	uint64_t ltime = tick->created_at;
-	time_t now = ltime / 1000;
+	//uint64_t ltime = tick->created_at;
+	//time_t now = ltime / 1000;
 
-	tm* tNow = localtime(&now);
+	double ts = tick->created_at;
+	time_t seconds = time_t(ts);
+	int micro_seconds = uint64_t(ts * 1000) % 1000;
+
+	tm* tNow = localtime(&seconds);
 	uint64_t date = (tNow->tm_year + 1900) * 10000 + (tNow->tm_mon + 1) * 100 + tNow->tm_mday;
 	uint64_t time = tNow->tm_hour * 10000 + tNow->tm_min * 100 + tNow->tm_sec;
-	int64_t data_time = (date * 1000000 + time) * 1000 + ltime % 1000;
+	int64_t data_time = (date * 1000000 + time) * 1000 + micro_seconds;
 
 	uint32_t actDate = (uint32_t)(data_time / 1000000000);
 	uint32_t actTime = data_time % 1000000000;
-	uint32_t actHour = actTime / 10000000;
+	//uint32_t actHour = actTime / 10000000;
+
+	//if (_sink)
+	//	write_log(_sink, LL_INFO, "[ParserGM] on tick action_date={}, action_time={}, create_at={}, seconds={}, micro_seconds={}",
+	//		actDate, actTime, tick->created_at, seconds, micro_seconds);
 
 	std::string code, exchg;
 	std::string symbol = tick->symbol;
@@ -376,9 +384,18 @@ void ParserGM::on_tick(Tick* tick)
 	quote.open = checkValid(tick->open);
 	quote.high = checkValid(tick->high);
 	quote.low = checkValid(tick->low);
+
+	quote.volume = tick->last_volume;
+	quote.turn_over = tick->last_amount;
+
 	quote.total_volume = tick->cum_volume;
-	quote.trading_date = _uTradingDate;
 	quote.total_turnover = tick->cum_amount;
+	quote.trading_date = _uTradingDate;
+
+	//quote.upper_limit = checkValid(market_data->upper_limit_price);
+	//quote.lower_limit = checkValid(market_data->lower_limit_price);
+
+	//quote.pre_close = checkValid(market_data->pre_close_price);	
 
 	//Î¯Âô¼Û¸ñ
 	for (int i = 0; i < 10; i++)
@@ -392,4 +409,6 @@ void ParserGM::on_tick(Tick* tick)
 
 	if (_sink)
 		_sink->handleQuote(wt_tick, 1);
+
+	wt_tick->release();
 }
