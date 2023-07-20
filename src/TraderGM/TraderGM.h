@@ -104,8 +104,6 @@ public:
 
 private:
 	inline uint32_t			genRequestID();
-	void					doLogin();
-	void					doWork();
 
 	inline WTSOrderInfo*	makeOrderInfo(Order *order);
 	inline WTSEntrust*		makeEntrust(Order *order);
@@ -126,6 +124,7 @@ private:
 
 	bool					_connected;
 	bool					_ready;
+	//bool					_bStopped;
 	uint32_t				_tradingday;
 	std::atomic<uint32_t>		_reqid;
 	std::atomic<uint32_t>		_ordref;		//报单引用
@@ -133,22 +132,21 @@ private:
 	boost::asio::io_service		_asyncio;
 	StdThreadPtr				_thrd_api;
 
-
 	typedef std::queue<CommonExecuter>	QueryQue;
 	QueryQue				_queQuery;
 	StdUniqueMutex			_mtxQuery;
-	bool					_bStopped;
 	StdThreadPtr			_thrd_worker;
 
 
-	//委托单标记缓存器
+	// entrust id <-> user tag 缓存器
 	WtKVCache		m_eidCache;
-	//订单标记缓存器
+
+	// order id <-> entrust id 缓存器
 	WtKVCache		m_oidCache;
 
 	std::string		_strategy_id;
 	std::string		_token;
-	int				_mode;
-	double			_initial_cash;  // 回测初始资金
+	//int				_mode;
+	//double			_initial_cash;  // 回测初始资金
 };
 
