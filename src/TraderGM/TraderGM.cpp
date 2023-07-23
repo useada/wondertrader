@@ -55,7 +55,7 @@ extern "C"
 		}
 		else
 		{
-			std::cout << "[TraderGM] load gmsdk success" << std::endl;
+			std::cout << "[TraderGM] load " << dllpath << " success" << std::endl;
 		}
 
 
@@ -262,6 +262,8 @@ TraderGM::~TraderGM()
 
 bool TraderGM::init(WTSVariant *config)
 {
+	std::cout << "[TraderGM] init" << std::endl;
+
 	_strategy_id = config->getCString("strategy_id");
 	_token = config->getCString("token");
 	//_mode = config->getInt32("mode");
@@ -281,7 +283,7 @@ bool TraderGM::init(WTSVariant *config)
 
 	//Strategy::set_backtest_config("2023-07-07 09:30:00", "2023-07-07 15:00:00", 1000000, 1, 0, 0, 0, 1);
 
-	std::string user = _token;
+	std::string user = _strategy_id;
 
 	{
 		// 初始化订单标记缓存器
@@ -291,6 +293,7 @@ bool TraderGM::init(WTSVariant *config)
 		if (!StdFile::exists(path.c_str()))
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_eid.sc";
+
 		m_oidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
@@ -304,6 +307,7 @@ bool TraderGM::init(WTSVariant *config)
 		if (!StdFile::exists(path.c_str()))
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_oid.sc";
+
 		m_eidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
@@ -376,7 +380,8 @@ bool TraderGM::makeEntrustID(char* buffer, int length)
 		uint32_t orderref = _ordref.fetch_add(1) + 1;
 		//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderref);
 
-		std::string user = _token;
+		//std::string user = _token;
+		std::string user = _strategy_id;
 		fmtutil::format_to(buffer, "{}#{}#{}", user, _tradingday, orderref);
 
 		write_log(_sink, LL_DEBUG, "make entrust id: {}", buffer);
@@ -392,7 +397,7 @@ bool TraderGM::makeEntrustID(char* buffer, int length)
 
 int TraderGM::orderInsert(WTSEntrust* entrust)
 {
-	write_log(_sink, LL_DEBUG, "[TraderGM] to order insert ...");
+	write_log(_sink, LL_DEBUG, "[TraderGM] to order insert: entrust id={}", entrust->getEntrustID());
 
 	if (! (_ready && _connected))
 	{
@@ -408,17 +413,20 @@ int TraderGM::orderInsert(WTSEntrust* entrust)
 	auto orderType = OrderType_Limit;
 	auto positionEffect = wrapOffsetType(entrust->getOffsetType());
 
-	write_log(_sink, LL_DEBUG, "[TraderGM] order insert: side={}, orderType={}, positionEffect={}", side, orderType, positionEffect);
+	write_log(_sink, LL_DEBUG, "[TraderGM] order insert: entrust id={}, side={}, orderType={}, positionEffect={}",
+		entrust->getEntrustID(), side, orderType, positionEffect);
 
 	Order order = place_order(symbol.c_str(), entrust->getVolume(), side, orderType, positionEffect, entrust->getPrice());
 	if (order.status == OrderStatus_Rejected)
 	{
-		write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: {}", order.ord_rej_reason_detail);
+		write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: entrust id={}, reason={}",
+			entrust->getEntrustID(), order.ord_rej_reason_detail);
 		return -1;
 	}
 
 	//StrUtil::trim(pRet->getOrderID()).c_str()
-	m_oidCache.put(order.cl_ord_id, entrust->getEntrustID(), 0, [this](const char* message) {
+	const char* order_id = StrUtil::trim(order.cl_ord_id).c_str();
+	m_oidCache.put(order_id, entrust->getEntrustID(), 0, [this](const char* message) {
 		write_log(_sink, LL_WARN, message);
 	});
 
@@ -429,7 +437,8 @@ int TraderGM::orderInsert(WTSEntrust* entrust)
 		});
 	}
 
-	write_log(_sink, LL_DEBUG, "[TraderGM] order insert success: order id={}, status={}", order.cl_ord_id, order.status);
+	write_log(_sink, LL_DEBUG, "[TraderGM] order insert success: entrust id={}, order id={}, status={}, usertag={}",
+		entrust->getEntrustID(), order.cl_ord_id, order.status, entrust->getUserTag());
 	return 0;
 }
 
@@ -681,9 +690,10 @@ WTSEntrust* TraderGM::makeEntrust(Order* order)
 
 	pRet->setOrderFlag(WOF_NOR);
 
-	genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
 
-	const char* eid = m_oidCache.get(order->cl_ord_id);
+	const char* order_id = StrUtil::trim(order->cl_ord_id).c_str();
+	const char* eid = m_oidCache.get(order_id);
+	//genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
 	fmtutil::format_to(pRet->getEntrustID(), "{}", eid);
 
 	const char* usertag = m_eidCache.get(pRet->getEntrustID());
@@ -756,16 +766,18 @@ WTSOrderInfo* TraderGM::makeOrderInfo(Order *order)
 	if (order->status == OrderStatus_Rejected)
 		pRet->setError(true);
 
-	genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
 	fmtutil::format_to(pRet->getOrderID(), "{}", order->cl_ord_id);
 
 	pRet->setStateMsg("");
 
-	const char* eid = m_oidCache.get(order->cl_ord_id);
+	const char* order_id = StrUtil::trim(order->cl_ord_id).c_str();
+	const char* eid = m_oidCache.get(order_id);
+	//genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
 	fmtutil::format_to(pRet->getEntrustID(), "{}", eid);
 
 	const char* usertag = m_eidCache.get(pRet->getEntrustID());
-	write_log(_sink, LL_DEBUG, "order fetch usertag: order id={}, tag={}", order->cl_ord_id, usertag);
+	write_log(_sink, LL_DEBUG, "order fetch usertag: entrust id={}, order id={}, tag={}",
+		pRet->getEntrustID(), order->cl_ord_id, usertag);
 
 	if (strlen(usertag) == 0)
 	{
@@ -828,10 +840,12 @@ WTSTradeInfo* TraderGM::makeTradeInfo(ExecRpt* trade)
 	double amount = trade->volume*pRet->getPrice();
 	pRet->setAmount(amount);
 
-	const char* eid = m_oidCache.get(trade->cl_ord_id);
+	const char* order_id = StrUtil::trim(trade->cl_ord_id).c_str();
+	const char* eid = m_oidCache.get(order_id);
 	const char* usertag = m_eidCache.get(eid);
 
-	write_log(_sink, LL_DEBUG, "trade fetch usertag: order id={}, tag={}", trade->cl_ord_id, usertag);
+	write_log(_sink, LL_DEBUG, "trade fetch usertag: entrust id={}, order id={}, tag={}",
+		eid, trade->cl_ord_id, usertag);
 
 	if (strlen(usertag))
 		pRet->setUserTag(usertag);
@@ -940,24 +954,24 @@ WTSAccountInfo* TraderGM::makeAccountInfo(Cash *cash)
 	return accountInfo;
 }
 
-void TraderGM::genEntrustID(char* buffer, char* orderRef)
-{
-	//这里不再使用sessionid，因为每次登陆会不同，如果使用的话，可能会造成不唯一的情况
-	//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderRef);
+//void TraderGM::genEntrustID(char* buffer, char* orderRef)
+//{
+//	//这里不再使用sessionid，因为每次登陆会不同，如果使用的话，可能会造成不唯一的情况
+//	//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderRef);
+//
+//	std::string user = _token;
+//	fmtutil::format_to(buffer, "{}#{}#{}", user.c_str(), _tradingday, orderRef);
+//}
 
-	std::string user = _token;
-	fmtutil::format_to(buffer, "{}#{}#{}", user.c_str(), _tradingday, orderRef);
-}
-
-bool TraderGM::extractEntrustID(const char* entrustid, uint32_t &orderRef)
-{
-	auto idx = StrUtil::findLast(entrustid, '#');
-	if (idx == std::string::npos)
-		return false;
-
-	orderRef = strtoul(entrustid + idx + 1, NULL, 10);
-	return true;
-}
+//bool TraderGM::extractEntrustID(const char* entrustid, uint32_t &orderRef)
+//{
+//	auto idx = StrUtil::findLast(entrustid, '#');
+//	if (idx == std::string::npos)
+//		return false;
+//
+//	orderRef = strtoul(entrustid + idx + 1, NULL, 10);
+//	return true;
+//}
 
 uint32_t TraderGM::genRequestID()
 {
@@ -1021,7 +1035,7 @@ void TraderGM::on_trade_data_connected()
 		_sink->handleEvent(WTE_Connect, 0);
 	}
 
-	write_log(_sink, LL_INFO, "[TraderGM] trade date connected");
+	write_log(_sink, LL_INFO, "[TraderGM] trade data connected");
 }
 
 //void TraderGM::OnDisconnected(uint64_t session_id, int reason)
@@ -1043,7 +1057,7 @@ void TraderGM::on_trade_data_disconnected()
 		_sink->handleEvent(WTE_Close, -1);
 	}
 
-	write_log(_sink, LL_WARN, "[TraderGM] trade date disconnected");
+	write_log(_sink, LL_WARN, "[TraderGM] trade data disconnected");
 }
 
 //void TraderGM::OnError(XTPRI *error_info)
@@ -1085,6 +1099,8 @@ void TraderGM::on_error(int error_code, const char *error_msg)
 // gm
 void TraderGM::on_order_status(Order *order)
 {
+	write_log(_sink, LL_DEBUG, "on order: order id={}", order->cl_ord_id);
+
 	WTSOrderInfo *orderInfo = makeOrderInfo(order);
 	if (orderInfo != nullptr)
 	{
@@ -1109,6 +1125,8 @@ void TraderGM::on_order_status(Order *order)
 
 void TraderGM::on_execution_report(ExecRpt* trade)
 {
+	write_log(_sink, LL_DEBUG, "on trade: trade id={}, order id={}", trade->exec_id, trade->cl_ord_id);
+
 	WTSTradeInfo *trdInfo = makeTradeInfo(trade);
 	if (trdInfo != nullptr)
 	{

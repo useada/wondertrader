@@ -328,7 +328,7 @@ void ParserGM::on_market_data_disconnected()
 void ParserGM::on_tick(Tick* tick)
 {
 	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on time={}, tick={}, price={}", tick->created_at, tick->symbol, tick->price);
+		write_log(_sink, LL_INFO, "[ParserGM] on tick: time={}, symbol={}, price={}", tick->created_at, tick->symbol, tick->price);
 
 	if (_pBaseDataMgr == NULL)
 	{

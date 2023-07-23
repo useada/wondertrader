@@ -26,6 +26,42 @@
 
 USING_NS_WTP;
 
+
+class Cache
+{
+private:
+	//typedef WTSHashMap<std::string> Hash;
+	typedef std::map<std::string, std::string> Hash;
+	Hash					_hash;
+	StdUniqueMutex			_mtx;
+
+public:
+	bool	init(const char* filename, uint32_t uDate, CacheLogger logger = nullptr)
+	{
+		return true;
+	}
+
+	const char* get(const char* key) const
+	{
+		auto it = _hash.find(key);
+		if (it == _hash.end())
+		{
+			return "";
+		}
+
+		return it->second.c_str();
+	}
+
+	void	put(const char* key, const char* val, std::size_t len = 0, CacheLogger logger = nullptr)
+	{
+		_mtx.lock();
+		_hash[key] = val;
+		_mtx.unlock();
+	}
+};
+
+
+
 class TraderGM: public Strategy, public ITraderApi
 {
 public:
@@ -109,8 +145,8 @@ private:
 	inline WTSEntrust*		makeEntrust(Order *order);
 	inline WTSTradeInfo*	makeTradeInfo(ExecRpt* trade);
 
-	inline bool	extractEntrustID(const char* entrustid, uint32_t &orderRef);
-	inline void	genEntrustID(char* buffer, char* orderRef);
+	//inline bool	extractEntrustID(const char* entrustid, uint32_t &orderRef);
+	//inline void	genEntrustID(char* buffer, char* orderRef);
 
 private:
 	ITraderSpi*				_sink;
@@ -140,9 +176,11 @@ private:
 
 	// entrust id <-> user tag »º´æÆ÷
 	WtKVCache		m_eidCache;
+	//Cache		m_eidCache;
 
 	// order id <-> entrust id »º´æÆ÷
 	WtKVCache		m_oidCache;
+	//Cache		m_oidCache;
 
 	std::string		_strategy_id;
 	std::string		_token;
