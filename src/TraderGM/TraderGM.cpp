@@ -262,7 +262,7 @@ TraderGM::~TraderGM()
 
 bool TraderGM::init(WTSVariant *config)
 {
-	std::cout << "[TraderGM] init" << std::endl;
+	//std::cout << "[TraderGM] init" << std::endl << std::flush;
 
 	_strategy_id = config->getCString("strategy_id");
 	_token = config->getCString("token");
@@ -294,7 +294,7 @@ bool TraderGM::init(WTSVariant *config)
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_eid.sc";
 
-		m_oidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
+		_oidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
 	}
@@ -308,10 +308,11 @@ bool TraderGM::init(WTSVariant *config)
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_oid.sc";
 
-		m_eidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
+		_eidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
 	}
+
 
 	return true;
 }
@@ -424,15 +425,14 @@ int TraderGM::orderInsert(WTSEntrust* entrust)
 		return -1;
 	}
 
-	//StrUtil::trim(pRet->getOrderID()).c_str()
-	const char* order_id = StrUtil::trim(order.cl_ord_id).c_str();
-	m_oidCache.put(order_id, entrust->getEntrustID(), 0, [this](const char* message) {
+	std::string uniq_id = genOrderUniqID(order.cl_ord_id);
+	_oidCache.put(uniq_id.c_str(), entrust->getEntrustID(), 0, [this](const char* message) {
 		write_log(_sink, LL_WARN, message);
 	});
 
 	if (strlen(entrust->getUserTag()) > 0)
 	{
-		m_eidCache.put(entrust->getEntrustID(), entrust->getUserTag(), 0, [this](const char* message) {
+		_eidCache.put(entrust->getEntrustID(), entrust->getUserTag(), 0, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
 	}
@@ -519,6 +519,7 @@ int TraderGM::queryPositions()
 
 	{
 		StdUniqueLock lock(_mtxQuery);
+
 		_queQuery.push([this]() {
 
 			DataArray<Position>* positions = get_position();
@@ -570,19 +571,25 @@ int TraderGM::queryOrders()
 		StdUniqueLock lock(_mtxQuery);
 
 		_queQuery.push([this]() {
-			DataArray<Order>* orders = get_orders();
-			if (orders == nullptr)
+			DataArray<Order>* gm_orders = get_orders();
+			if (gm_orders == nullptr)
 			{
 				write_log(_sink, LL_ERROR, "[TraderGM] Orders querying failed");
 				return -1;
 			}
 
+			write_log(_sink, LL_DEBUG, "[TraderGM] Orders querying count={}", gm_orders->count());
+
 			if (nullptr == _orders)
 				_orders = WTSArray::create();
+			//WTSArray* orders = WTSArray::create();
 
-			for (auto i=0; i<orders->count(); i++)
+			for (auto i=0; i< gm_orders->count(); i++)
 			{
-				WTSOrderInfo* orderInfo = makeOrderInfo(&orders->at(i));
+				Order& gm_order = gm_orders->at(i);
+
+
+				WTSOrderInfo* orderInfo = makeOrderInfo(&gm_order);
 				if (orderInfo)
 				{
 					_orders->append(orderInfo, false);
@@ -622,6 +629,8 @@ int TraderGM::queryTrades()
 				write_log(_sink, LL_ERROR, "[TraderGM] Trades querying failed");
 				return -1;
 			}
+
+			write_log(_sink, LL_DEBUG, "[TraderGM] Trades querying count={}", trades->count());
 
 			if (nullptr == _trades)
 				_trades = WTSArray::create();
@@ -690,13 +699,13 @@ WTSEntrust* TraderGM::makeEntrust(Order* order)
 
 	pRet->setOrderFlag(WOF_NOR);
 
+	std::string uniq_id = genOrderUniqID(order->cl_ord_id);
+	const char* eid = _oidCache.get(uniq_id.c_str());
 
-	const char* order_id = StrUtil::trim(order->cl_ord_id).c_str();
-	const char* eid = m_oidCache.get(order_id);
 	//genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
 	fmtutil::format_to(pRet->getEntrustID(), "{}", eid);
 
-	const char* usertag = m_eidCache.get(pRet->getEntrustID());
+	const char* usertag = _eidCache.get(pRet->getEntrustID());
 	if (strlen(usertag) > 0)
 		pRet->setUserTag(usertag);
 
@@ -767,15 +776,18 @@ WTSOrderInfo* TraderGM::makeOrderInfo(Order *order)
 		pRet->setError(true);
 
 	fmtutil::format_to(pRet->getOrderID(), "{}", order->cl_ord_id);
+	//wt_strcpy(pRet->getOrderID(), order->cl_ord_id, 0);
 
 	pRet->setStateMsg("");
 
-	const char* order_id = StrUtil::trim(order->cl_ord_id).c_str();
-	const char* eid = m_oidCache.get(order_id);
-	//genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
-	fmtutil::format_to(pRet->getEntrustID(), "{}", eid);
+	std::string uniq_id = genOrderUniqID(order->cl_ord_id);
+	const char* eid = _oidCache.get(uniq_id.c_str());
 
-	const char* usertag = m_eidCache.get(pRet->getEntrustID());
+	//genEntrustID(pRet->getEntrustID(), order->cl_ord_id);
+	//fmtutil::format_to(pRet->getEntrustID(), "{}", eid);
+	wt_strcpy(pRet->getEntrustID(), eid, 0);
+
+	const char* usertag = _eidCache.get(pRet->getEntrustID());
 	write_log(_sink, LL_DEBUG, "order fetch usertag: entrust id={}, order id={}, tag={}",
 		pRet->getEntrustID(), order->cl_ord_id, usertag);
 
@@ -840,10 +852,10 @@ WTSTradeInfo* TraderGM::makeTradeInfo(ExecRpt* trade)
 	double amount = trade->volume*pRet->getPrice();
 	pRet->setAmount(amount);
 
-	const char* order_id = StrUtil::trim(trade->cl_ord_id).c_str();
-	const char* eid = m_oidCache.get(order_id);
-	const char* usertag = m_eidCache.get(eid);
+	std::string uniq_id = genOrderUniqID(trade->cl_ord_id);
+	const char* eid = _oidCache.get(uniq_id.c_str());
 
+	const char* usertag = _eidCache.get(eid);
 	write_log(_sink, LL_DEBUG, "trade fetch usertag: entrust id={}, order id={}, tag={}",
 		eid, trade->cl_ord_id, usertag);
 
@@ -976,6 +988,13 @@ WTSAccountInfo* TraderGM::makeAccountInfo(Cash *cash)
 uint32_t TraderGM::genRequestID()
 {
 	return _reqid.fetch_add(1) + 1;
+}
+
+std::string	TraderGM::genOrderUniqID(std::string orderID)
+{
+	char order_id[64];
+	wt_strcpy(order_id, orderID.c_str(), 8);
+	return order_id;
 }
 
 // ============================================================================

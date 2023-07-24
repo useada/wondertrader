@@ -142,14 +142,11 @@ bool ParserGM::init( WTSVariant* config )
 	//_begin_time = config->getCString("begin_time");
 	//_end_time = config->getCString("end_time");
 
-	if (_sink)
-	{
-		write_log(_sink, LL_INFO, "[ParserGM] strategy id: {}", _strategy_id);
-		write_log(_sink, LL_INFO, "[ParserGM] token: {}", _token);
-		//write_log(_sink, LL_INFO, "[ParserGM] mode: {}", _mode);
-		//write_log(_sink, LL_INFO, "[ParserGM] begin_time: {}", _begin_time);
-		//write_log(_sink, LL_INFO, "[ParserGM] end_time: {}", _end_time);
-	}
+	write_log(_sink, LL_INFO, "[ParserGM] strategy id: {}", _strategy_id);
+	write_log(_sink, LL_INFO, "[ParserGM] token: {}", _token);
+	//write_log(_sink, LL_INFO, "[ParserGM] mode: {}", _mode);
+	//write_log(_sink, LL_INFO, "[ParserGM] begin_time: {}", _begin_time);
+	//write_log(_sink, LL_INFO, "[ParserGM] end_time: {}", _end_time);
 
 	Strategy::set_strategy_id(_strategy_id.c_str());
 	Strategy::set_token(_token.c_str());
@@ -172,8 +169,7 @@ void ParserGM::release()
 
 bool ParserGM::connect()
 {
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] connect");
+	write_log(_sink, LL_INFO, "[ParserGM] connect");
 
 	_thrd_parser.reset(new StdThread(boost::bind(&ParserGM::doWork, this)));
 	return true;
@@ -182,8 +178,7 @@ bool ParserGM::connect()
 
 void ParserGM::doWork()
 {
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] do work in thread");
+	write_log(_sink, LL_INFO, "[ParserGM] do work in thread");
 
 	run();
 }
@@ -208,14 +203,12 @@ void ParserGM::subscribe( const CodeSet &vecSymbols )
 	for(; cit != vecSymbols.end(); cit++)
 	{
 		const auto &code = *cit;
-		//if (_sink)
-		//	write_log(_sink, LL_DEBUG, "[ParserGM] {} to subscribe", code.c_str());
+		//write_log(_sink, LL_DEBUG, "[ParserGM] {} to subscribe", code.c_str());
 
 		if(_set_subs.find(code) == _set_subs.end())
 		{
 			_set_subs.insert(code);
-			//if (_sink)
-			//	write_log(_sink, LL_INFO, "[ParserGM] {} add to subscribe list", code.c_str());
+			//write_log(_sink, LL_INFO, "[ParserGM] {} add to subscribe list", code.c_str());
 
 			//if (_uTradingDate != 0)
 			if (_ready)
@@ -224,14 +217,12 @@ void ParserGM::subscribe( const CodeSet &vecSymbols )
 				int iResult = Strategy::subscribe(gmCode.c_str(), "tick");
 				if (iResult != 0)
 				{
-					if (_sink)
-						write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
-							code.c_str(), gmCode.c_str(), iResult);
+					write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
+						code.c_str(), gmCode.c_str(), iResult);
 				}
 				else
 				{
-					if (_sink)
-						write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
+					write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
 				}
 			}
 		}
@@ -240,8 +231,7 @@ void ParserGM::subscribe( const CodeSet &vecSymbols )
 
 void ParserGM::subscribeOnInit()
 {
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] to subscribe on init");
+	write_log(_sink, LL_INFO, "[ParserGM] to subscribe on init");
 
 	for (auto& code : _set_subs)
 	{
@@ -249,14 +239,12 @@ void ParserGM::subscribeOnInit()
 		int iResult = Strategy::subscribe(gmCode.c_str(), "tick");
 		if (iResult != 0)
 		{
-			if (_sink)
-				write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
-					code.c_str(), gmCode.c_str(), iResult);
+			write_log(_sink, LL_ERROR, "[ParserGM] Sending subscribe request failed: code={}, gmCode={}, error={}",
+				code.c_str(), gmCode.c_str(), iResult);
 		}
 		else
 		{
-			if (_sink)
-				write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
+			write_log(_sink, LL_INFO, "[ParserGM] Market data of {} instruments subscribed", code.c_str());
 		}
 	}
 }
@@ -286,8 +274,7 @@ void ParserGM::registerSpi(IParserSpi* listener)
 void ParserGM::on_init()
 {
 	//std::cout << "ParserGM on_init" << std::endl;
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on init");
+	write_log(_sink, LL_INFO, "[ParserGM] on init");
 
 	//time_t t = now() / 1000;
 	const time_t t = now();
@@ -296,8 +283,7 @@ void ParserGM::on_init()
 	_uTradingDate = date;
 	_ready = true;
 
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on init tradingDate={}", _uTradingDate);
+	write_log(_sink, LL_INFO, "[ParserGM] on init tradingDate={}", _uTradingDate);
 
 	_sink->handleEvent(WPE_Login, 0);
 
@@ -311,8 +297,8 @@ void ParserGM::on_market_data_connected()
 	if (_sink)
 	{
 		_sink->handleEvent(WPE_Connect, 0);
-		write_log(_sink, LL_INFO, "[ParserGM] connected");
 	}
+	write_log(_sink, LL_INFO, "[ParserGM] connected");
 }
 
 void ParserGM::on_market_data_disconnected()
@@ -320,15 +306,14 @@ void ParserGM::on_market_data_disconnected()
 	_connected = false;
 	if (_sink)
 	{
-		write_log(_sink, LL_ERROR, "[ParserGM] Market data server disconnected");
 		_sink->handleEvent(WPE_Close, 0);
 	}
+	write_log(_sink, LL_ERROR, "[ParserGM] Market data server disconnected");
 }
 
 void ParserGM::on_tick(Tick* tick)
 {
-	if (_sink)
-		write_log(_sink, LL_INFO, "[ParserGM] on tick: time={}, symbol={}, price={}", tick->created_at, tick->symbol, tick->price);
+	write_log(_sink, LL_INFO, "[ParserGM] on tick: time={}, symbol={}, price={}", tick->created_at, tick->symbol, tick->price);
 
 	if (_pBaseDataMgr == NULL)
 	{
@@ -351,9 +336,8 @@ void ParserGM::on_tick(Tick* tick)
 	uint32_t actTime = data_time % 1000000000;
 	//uint32_t actHour = actTime / 10000000;
 
-	//if (_sink)
-	//	write_log(_sink, LL_INFO, "[ParserGM] on tick action_date={}, action_time={}, create_at={}, seconds={}, micro_seconds={}",
-	//		actDate, actTime, tick->created_at, seconds, micro_seconds);
+	//write_log(_sink, LL_INFO, "[ParserGM] on tick action_date={}, action_time={}, create_at={}, seconds={}, micro_seconds={}",
+	//	actDate, actTime, tick->created_at, seconds, micro_seconds);
 
 	std::string code, exchg;
 	std::string symbol = tick->symbol;
@@ -365,8 +349,7 @@ void ParserGM::on_tick(Tick* tick)
 	WTSContractInfo* ct = _pBaseDataMgr->getContract(code.c_str(), exchg.c_str());
 	if (ct == NULL)
 	{
-		if (_sink)
-			write_log(_sink, LL_ERROR, "[ParserGM] Instrument {}.{} not exists...", exchg.c_str(), code.c_str());
+		write_log(_sink, LL_ERROR, "[ParserGM] Instrument {}.{} not exists...", exchg.c_str(), code.c_str());
 		return;
 	}
 

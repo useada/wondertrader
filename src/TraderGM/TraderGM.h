@@ -140,6 +140,7 @@ public:
 
 private:
 	inline uint32_t			genRequestID();
+	std::string				genOrderUniqID(std::string orderID);
 
 	inline WTSOrderInfo*	makeOrderInfo(Order *order);
 	inline WTSEntrust*		makeEntrust(Order *order);
@@ -175,15 +176,17 @@ private:
 
 
 	// entrust id <-> user tag »º´æÆ÷
-	WtKVCache		m_eidCache;
-	//Cache		m_eidCache;
+	WtKVCache				_eidCache;
+	//Cache					_eidCache;
+	//StdUniqueMutex			_mtxEidCache;
 
 	// order id <-> entrust id »º´æÆ÷
-	WtKVCache		m_oidCache;
-	//Cache		m_oidCache;
+	WtKVCache				_oidCache;
+	//Cache					_oidCache;
+	//StdUniqueMutex			_mtxOidCache;
 
-	std::string		_strategy_id;
-	std::string		_token;
+	std::string				_strategy_id;
+	std::string				_token;
 	//int				_mode;
 	//double			_initial_cash;  // »Ø²â³õÊ¼×Ê½ð
 };
