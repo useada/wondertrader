@@ -262,7 +262,7 @@ TraderGM::~TraderGM()
 
 bool TraderGM::init(WTSVariant *config)
 {
-	//std::cout << "[TraderGM] init" << std::endl << std::flush;
+	std::cout << "[TraderGM] init" << std::endl << std::flush;
 
 	_strategy_id = config->getCString("strategy_id");
 	_token = config->getCString("token");
@@ -294,9 +294,11 @@ bool TraderGM::init(WTSVariant *config)
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_eid.sc";
 
+		std::cout << "[TraderGM] init oid cache" << std::endl << std::flush;
 		_oidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
+		std::cout << "[TraderGM] init oid cache success" << std::endl << std::flush;
 	}
 
 	{
@@ -308,12 +310,15 @@ bool TraderGM::init(WTSVariant *config)
 			boost::filesystem::create_directories(path.c_str());
 		ss << user << "_oid.sc";
 
+		std::cout << "[TraderGM] init eid cache" << std::endl << std::flush;
 		_eidCache.init(ss.str().c_str(), _tradingday, [this](const char* message) {
 			write_log(_sink, LL_WARN, message);
 		});
+		std::cout << "[TraderGM] init eid cache success" << std::endl << std::flush;
 	}
 
 
+	std::cout << "[TraderGM] init success" << std::endl << std::flush;
 	return true;
 }
 
@@ -382,9 +387,10 @@ bool TraderGM::makeEntrustID(char* buffer, int length)
 		//fmtutil::format_to(buffer, "{}#{}#{}", _user, _tradingday, orderref);
 
 		//std::string user = _token;
-		std::string user = _strategy_id;
-		fmtutil::format_to(buffer, "{}#{}#{}", user, _tradingday, orderref);
+		//std::string user = _strategy_id;
+		//fmtutil::format_to(buffer, "{}#{}#{}", user, _tradingday, orderref);
 
+		fmtutil::format_to(buffer, "{}#{}", _tradingday, orderref);
 		write_log(_sink, LL_DEBUG, "make entrust id: {}", buffer);
 		return true;
 	}
@@ -1038,12 +1044,13 @@ void TraderGM::on_init()
 	}
 
 	_ready = true;
-	write_log(_sink, LL_INFO, "[TraderGM] on init tradingDate={}", _tradingday);
 
 	if (_sink)
 	{
 		_sink->onLoginResult(true, "", _tradingday);
 	}
+
+	write_log(_sink, LL_INFO, "[TraderGM] on init success tradingDate={}", _tradingday);
 }
 
 void TraderGM::on_trade_data_connected()

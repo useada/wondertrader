@@ -133,7 +133,7 @@ ParserGM::~ParserGM()
 
 bool ParserGM::init( WTSVariant* config )
 {
-	//std::cout << "ParserGM init" << std::endl;
+	std::cout << "[ParserGM] init" << std::endl;
 
 	_strategy_id = config->getCString("strategy_id");
 	_token = config->getCString("token");
@@ -158,6 +158,7 @@ bool ParserGM::init( WTSVariant* config )
 	//	1, 0, 0, 0, 1);
 	//Strategy::set_backtest_config("2023-07-07 09:30:00", "2023-07-07 15:00:00",
 	//	1000000, 1, 0, 0, 0, 1);
+	std::cout << "[ParserGM] init success" << std::endl;
 
 	return true;
 }
@@ -283,11 +284,10 @@ void ParserGM::on_init()
 	_uTradingDate = date;
 	_ready = true;
 
-	write_log(_sink, LL_INFO, "[ParserGM] on init tradingDate={}", _uTradingDate);
-
 	_sink->handleEvent(WPE_Login, 0);
-
 	subscribeOnInit();
+
+	write_log(_sink, LL_INFO, "[ParserGM] on init success tradingDate={}", _uTradingDate);
 }
 
 
