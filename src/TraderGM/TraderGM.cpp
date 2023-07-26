@@ -133,45 +133,43 @@ inline std::string fromGmExchg(const std::string emExchg)
 }
 
 
-inline WTSDirectionType wrapPosDirection(PositionSide side)
+inline OrderType toGmOrderType(WTSPriceType priceType)
 {
-	switch (side)
+	if (priceType == WPT_ANYPRICE)
 	{
-	case PositionSide_Short: return WDT_SHORT;
-	default:
-		return WDT_LONG;
+		return OrderType_Market;
+	}
+	else if (priceType == WPT_LIMITPRICE)
+	{
+		return OrderType_Limit;
+	}
+	else
+	{
+		return OrderType_Limit;
 	}
 }
 
-inline PositionSide wrapDirectionType(WTSDirectionType dirType, WTSOffsetType offsetType)
+inline OrderSide toGMOrderSide(WTSDirectionType dirType)
 {
+	//if (WDT_LONG == dirType)
+	//	if (offsetType == WOT_OPEN)
+	//		return PositionSide_Long;
+	//	else
+	//		return PositionSide_Short;
+	//else
+	//	if (offsetType == WOT_OPEN)
+	//		return PositionSide_Short;
+	//	else
+	//		return PositionSide_Long;
+
+
 	if (WDT_LONG == dirType)
-		if (offsetType == WOT_OPEN)
-			return PositionSide_Long;
-		else
-			return PositionSide_Short;
+		return OrderSide_Buy;
 	else
-		if (offsetType == WOT_OPEN)
-			return PositionSide_Short;
-		else
-			return PositionSide_Long;
+		return OrderSide_Sell;
 }
 
-inline WTSDirectionType wrapDirectionType(PositionSide side, PositionEffect pe = PositionEffect_Unknown)
-{
-	if (PositionSide_Long == side)
-		if (pe == PositionEffect_Open)
-			return WDT_LONG;
-		else
-			return WDT_SHORT;
-	else
-		if (pe == PositionEffect_Open)
-			return WDT_SHORT;
-		else
-			return WDT_LONG;
-}
-
-inline PositionEffect wrapOffsetType(WTSOffsetType offType)
+inline PositionEffect toGmPositionEffect(WTSOffsetType offType)
 {
 	switch (offType)
 	{
@@ -188,6 +186,32 @@ inline PositionEffect wrapOffsetType(WTSOffsetType offType)
 	}
 }
 
+// 持仓方向：多空
+inline WTSDirectionType wrapPositionDirection(PositionSide side)
+{
+	switch (side)
+	{
+	case PositionSide_Short: return WDT_SHORT;
+	default:
+		return WDT_LONG;
+	}
+}
+
+inline WTSDirectionType wrapDirectionType(PositionSide side, PositionEffect pe = PositionEffect_Unknown)
+{
+	if (PositionSide_Long == side)
+		if (pe == PositionEffect_Open)
+			return WDT_LONG;
+		else
+			return WDT_SHORT;
+	else
+		if (pe == PositionEffect_Open)
+			return WDT_SHORT;
+		else
+			return WDT_LONG;
+}
+
+
 inline WTSOffsetType wrapOffsetType(PositionSide side, PositionEffect offType = PositionEffect_Unknown)
 {
 	if (PositionEffect_Open == offType)
@@ -202,12 +226,12 @@ inline WTSOffsetType wrapOffsetType(PositionSide side, PositionEffect offType = 
 		return WOT_FORCECLOSE;
 }
 
-inline WTSPriceType wrapPriceType(OrderType orderType)
+inline WTSPriceType wrapPriceType(OrderType order_type)
 {
-	if (OrderType_Limit == orderType)
-		return WPT_LIMITPRICE;
-	else 
+	if (order_type == OrderType_Market)
 		return WPT_ANYPRICE;
+	else
+		return WPT_LIMITPRICE;
 }
 
 inline WTSOrderState wrapOrderState(OrderStatus orderStatus)
@@ -226,6 +250,8 @@ inline WTSOrderState wrapOrderState(OrderStatus orderStatus)
 	case OrderStatus_Expired:
 	case OrderStatus_Canceled:
 		return WOS_Canceled;
+	//case OrderStatus_Rejected:
+	//	return 0;
 	default:
 		return WOS_Nottouched;
 	}
@@ -404,7 +430,8 @@ bool TraderGM::makeEntrustID(char* buffer, int length)
 
 int TraderGM::orderInsert(WTSEntrust* entrust)
 {
-	write_log(_sink, LL_DEBUG, "[TraderGM] to order insert: entrust id={}", entrust->getEntrustID());
+	write_log(_sink, LL_DEBUG, "[TraderGM] to order insert: code={}, entrust id={}, direction={}, offset type={}, price type={}",
+		entrust->getCode(), entrust->getEntrustID(), entrust->getDirection(), entrust->getOffsetType(), entrust->getPriceType());
 
 	if (! (_ready && _connected))
 	{
@@ -416,14 +443,14 @@ int TraderGM::orderInsert(WTSEntrust* entrust)
 	symbol += ".";
 	symbol += entrust->getCode();
 
-	auto side = wrapDirectionType(entrust->getDirection(), entrust->getOffsetType());
-	auto orderType = OrderType_Limit;
-	auto positionEffect = wrapOffsetType(entrust->getOffsetType());
+	const auto order_side = toGMOrderSide(entrust->getDirection());
+	const auto order_type = toGmOrderType(entrust->getPriceType());
+	const auto position_effect = toGmPositionEffect(entrust->getOffsetType());
 
-	write_log(_sink, LL_DEBUG, "[TraderGM] order insert: entrust id={}, side={}, orderType={}, positionEffect={}",
-		entrust->getEntrustID(), side, orderType, positionEffect);
+	write_log(_sink, LL_DEBUG, "[TraderGM] order insert: entrust id={}, order side={}, order type={}, position effect={}",
+		entrust->getEntrustID(), order_side, order_type, position_effect);
 
-	Order order = place_order(symbol.c_str(), entrust->getVolume(), side, orderType, positionEffect, entrust->getPrice());
+	Order order = place_order(symbol.c_str(), entrust->getVolume(), order_side, order_type, position_effect, entrust->getPrice());
 	if (order.status == OrderStatus_Rejected)
 	{
 		write_log(_sink, LL_ERROR, "[TraderGM] Order inserting failed: entrust id={}, reason={}",
@@ -695,6 +722,7 @@ WTSEntrust* TraderGM::makeEntrust(Order* order)
 		pRet->setDirection(WDT_LONG);
 	else
 		pRet->setDirection(wrapDirectionType(PositionSide(order->position_side), PositionEffect(order->position_effect)));
+		//pRet->setDirection(wrapDirectionType(PositionSide(order->position_side), PositionEffect(order->position_effect)));
 
 	pRet->setPriceType(wrapPriceType(OrderType(order->order_type)));
 
@@ -847,7 +875,8 @@ WTSTradeInfo* TraderGM::makeTradeInfo(ExecRpt* trade)
 		pRet->setDirection(wrapDirectionType(PositionSide(trade->side), PositionEffect(trade->position_effect)));
 
 	if (!commInfo->isOption())
-		pRet->setOffsetType((trade->side == PositionSide_Long) ? WOT_OPEN : WOT_CLOSE);
+		pRet->setOffsetType((trade->side == OrderSide_Buy) ? WOT_OPEN : WOT_CLOSE);
+		//pRet->setOffsetType((trade->side == PositionSide_Long) ? WOT_OPEN : WOT_CLOSE);
 	else
 		pRet->setOffsetType(wrapOffsetType(PositionSide(trade->side), PositionEffect(trade->position_effect)));
 
@@ -901,7 +930,7 @@ void TraderGM::OnQueryPosition(Position *pos)
 		//std::string key = fmt::format("{}-{}", code.c_str(), position->position_direction);
 		std::string key = fmt::format("{}-{}", code.c_str(), pos->side);
 
-		WTSPositionItem* tmp = (WTSPositionItem*)_positions->get(key);
+		auto tmp = (WTSPositionItem*)_positions->get(key);
 		if (tmp == nullptr)
 		{
 			tmp = WTSPositionItem::create(code.c_str(), commInfo->getCurrency(), commInfo->getExchg());
@@ -910,7 +939,7 @@ void TraderGM::OnQueryPosition(Position *pos)
 		}
 
 		//tmp->setDirection(wrapPosDirection(position->position_direction));
-		tmp->setDirection(wrapPosDirection(PositionSide(pos->side)));
+		tmp->setDirection(wrapPositionDirection(PositionSide(pos->side)));
 
 		//tmp->setNewPosition((double)(position->total_qty - position->yesterday_position));
 		tmp->setNewPosition((double)(pos->volume_today));
@@ -1125,7 +1154,25 @@ void TraderGM::on_error(int error_code, const char *error_msg)
 // gm
 void TraderGM::on_order_status(Order *order)
 {
-	write_log(_sink, LL_DEBUG, "on order: order id={}", order->cl_ord_id);
+	write_log(_sink, LL_DEBUG, "on order: order id={}, status={}", order->cl_ord_id, order->status);
+
+	if(order->status == OrderStatus_Rejected)
+	{
+		write_log(_sink, LL_DEBUG, "on order rejected: order id={}, status={}, detail={}",
+			order->cl_ord_id, order->status, order->ord_rej_reason_detail);
+
+		WTSEntrust* entrust = makeEntrust(order);
+
+		std::string msg = order->ord_rej_reason_detail;
+		WTSError* error = WTSError::create(WEC_ORDERINSERT, msg.c_str());
+
+		_sink->onRspEntrust(entrust, error);
+
+		error->release();
+		entrust->release();
+
+		return;
+	}
 
 	WTSOrderInfo *orderInfo = makeOrderInfo(order);
 	if (orderInfo != nullptr)
