@@ -48,6 +48,7 @@ public:
 	virtual void on_bar(const char* stdCode, const char* period, uint32_t times, WTSBarStruct* newBar) {}
 	virtual void on_session_begin(uint32_t uTDate) {}
 	virtual void on_session_end(uint32_t uTDate) {}
+	virtual void on_params_updated(){}
 
 	/*
 	 *	回测结束事件
@@ -59,6 +60,13 @@ public:
 	virtual void	on_ordque_updated(const char* stdCode, WTSOrdQueData* newOrdQue) {}
 	virtual void	on_orddtl_updated(const char* stdCode, WTSOrdDtlData* newOrdDtl) {}
 	virtual void	on_trans_updated(const char* stdCode, WTSTransData* newTrans) {}
+
+	virtual void	watch_param(const char* name, double val){}
+	virtual void	watch_param(const char* name, uint32_t val){}
+	virtual void	watch_param(const char* name, uint64_t val){}
+	virtual void	watch_param(const char* name, int32_t val){}
+	virtual void	watch_param(const char* name, int64_t val){}
+	virtual void	commit_param_watcher() {}
 
 	//策略接口
 
